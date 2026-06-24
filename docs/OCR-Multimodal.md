@@ -83,15 +83,20 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   `deepseekocr` modules, and a `MODEL_REMAPPING` entry resolves the hyphenated
   `model_type`. `load_model` on the real checkpoint (no alias) returns a `Model`
   with a clean weight load. See `Backend/requirements.txt` for the fork pin.
-- **Pending (next, requires Apple-Silicon GPU):**
-  1. Processor: Unlimited-OCR ships a custom `trust_remote_code` processor that
-     `AutoProcessor` can't auto-instantiate; wire/reuse the v1 `DeepseekOCRProcessor`
-     so full `load()` (model + processor) succeeds.
-  2. Weight conversion (HF → MLX) + a forward-pass parity check vs the HF reference.
-  3. The image-text dataset loader/collator and the MLX-VLM LoRA training loop
-     (`run_multimodal` in `Backend/training_runner.py`).
+- **Processor + end-to-end OCR done (verified).** Added `UnlimitedOCRProcessor`
+  (a `DeepseekOCRProcessor` subclass that forces `trust_remote_code=False`, since
+  the raw HF repo's custom processor pulls torch-only remote code MLX never needs),
+  registered via the AutoProcessor patch. Full `mlx_vlm.load()` returns
+  `Model + UnlimitedOCRProcessor`, and `generate()` on a synthetic document
+  recovers the rendered text exactly, with DeepSeek-OCR grounding boxes. This is
+  functional OCR validation (not bit-exact logit parity vs the torch reference).
+- **Pending (next):**
+  1. The image-text dataset loader/collator and the MLX-VLM LoRA training loop
+     (`run_multimodal` in `Backend/training_runner.py`), replacing the fail-loud guard.
+  2. Optional: weight conversion (`mlx_vlm.convert`) to publish a quantized MLX repo,
+     and a bit-exact parity check vs the HF reference.
 
-Until those land, the backend fails loud when this family is selected.
+Until the trainer lands, the backend fails loud when this family is selected.
 
 ## Running the Phase 0 diagnostic
 
