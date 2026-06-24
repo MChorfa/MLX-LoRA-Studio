@@ -46,6 +46,10 @@ struct OCRView: View {
                     config: $store.ocr,
                     lastRunFolder: store.ocrRunner.lastRunFolder
                 )
+                OCRResultsSection(
+                    outputDir: store.ocrRunner.lastOCROutputDir,
+                    isRunning: store.ocrRunner.isRunning
+                )
             }
             .padding(24)
         }
@@ -220,6 +224,111 @@ private struct OCRRunConsolePill: View {
         )
         .animation(.easeInOut(duration: 0.2), value: runner.isRunning)
         .animation(.easeInOut(duration: 0.18), value: runner.logLines.count)
+    }
+}
+
+// MARK: - Results
+
+private struct OCRResultsSection: View {
+    let outputDir: String
+    let isRunning: Bool
+
+    @State private var files: [URL] = []
+    @State private var preview: OCRPreview?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionTitle("Results")
+                Spacer()
+                Button {
+                    reload()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .disabled(outputDir.isEmpty)
+            }
+
+            if files.isEmpty {
+                Text(outputDir.isEmpty ? "Run OCR to produce Markdown files." : "No .md files yet.")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            } else {
+                ForEach(files, id: \.self) { url in
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.text")
+                            .foregroundStyle(.secondary)
+                        Text(url.lastPathComponent)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button("Preview") { preview = OCRPreview(url: url) }
+                            .buttonStyle(.borderless)
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        } label: {
+                            Label("Reveal", systemImage: "folder").labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .font(.callout)
+                }
+            }
+        }
+        .formBlock()
+        .onChange(of: isRunning) { _, running in
+            // Reload when a run finishes so freshly written files appear.
+            if !running { reload() }
+        }
+        .onChange(of: outputDir) { _, _ in reload() }
+        .onAppear { reload() }
+        .sheet(item: $preview) { OCRPreviewSheet(preview: $0) }
+    }
+
+    private func reload() {
+        guard !outputDir.isEmpty else { files = []; return }
+        let url = URL(fileURLWithPath: outputDir, isDirectory: true)
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: nil
+        )) ?? []
+        files = contents.filter { $0.pathExtension.lowercased() == "md" }.sorted {
+            $0.lastPathComponent < $1.lastPathComponent
+        }
+    }
+}
+
+private struct OCRPreview: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
+private struct OCRPreviewSheet: View {
+    let preview: OCRPreview
+    @Environment(\.dismiss) private var dismiss
+
+    private var text: String {
+        (try? String(contentsOf: preview.url, encoding: .utf8)) ?? "Could not read file."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(preview.url.lastPathComponent).font(.headline).lineLimit(1)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                Text(text)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+            }
+        }
+        .frame(minWidth: 640, minHeight: 480)
     }
 }
 

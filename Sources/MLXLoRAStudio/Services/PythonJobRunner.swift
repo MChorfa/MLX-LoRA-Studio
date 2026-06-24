@@ -33,6 +33,8 @@ final class PythonJobRunner {
     var currentCommand = ""
     var lastSpecPath = ""
     var lastRunFolder = ""
+    /// Directory the OCR job writes `.md` outputs into (for the results viewer).
+    var lastOCROutputDir = ""
     var startedAt: Date?
     var progressCurrent: Int?
     var progressTotal: Int?
@@ -342,6 +344,7 @@ final class PythonJobRunner {
         } catch {
             throw RunnerError.invalidOutputRoot
         }
+        lastOCROutputDir = directory.path
         return directory.path
     }
 
@@ -462,6 +465,7 @@ final class PythonJobRunner {
         metrics.removeAll()
         lastSpecPath = ""
         lastRunFolder = ""
+        lastOCROutputDir = ""
         metricsFlushTask?.cancel()
         metricsFlushTask = nil
         parser.reset()
