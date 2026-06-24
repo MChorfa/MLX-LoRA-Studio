@@ -95,9 +95,16 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   MLX-VLM `train()` loop, and tees its output into `@@studio_metric` events for
   Live Metrics. Verified: a 2-step run on a synthetic document fixture completed
   with loss 2.410 -> 2.329 and saved adapters.
-- **Optional next:** weight conversion (`mlx_vlm.convert`) to publish a quantized
-  MLX repo; bit-exact logit parity vs the HF reference; multi-image batch_size > 1
-  (currently the multi-crop collation targets batch_size 1).
+- **Quantized conversion (`mlx_vlm convert`) — works with caveats.** Converting to
+  MLX works; on a real arXiv page, **8-bit (`--q-bits 8`, ~9.4 bpw, 3.9 GB)
+  reproduces text accurately**, while **4-bit (~5.9 bpw, 2.45 GB) garbles numbers**
+  — use 8-bit. Independently of bit-width, the *converted* repo currently emits
+  GPT-2 byte-BPE markers (`Ġ` for space, `Ċ` for newline) in its output: a
+  detokenization issue in the tokenizer that `convert` writes (the original
+  `baidu/Unlimited-OCR` repo decodes cleanly). Until that tokenizer-save is fixed,
+  load the model directly (bf16) rather than a converted repo.
+- **Optional next:** fix the converted-repo detokenizer; bit-exact logit parity vs
+  the HF reference; multi-image `batch_size > 1` (multi-crop collation targets 1).
 
 ## In the app: the OCR page
 
