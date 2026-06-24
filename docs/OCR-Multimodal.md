@@ -99,6 +99,29 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   MLX repo; bit-exact logit parity vs the HF reference; multi-image batch_size > 1
   (currently the multi-crop collation targets batch_size 1).
 
+## Running OCR on PDFs and images
+
+`Backend/ocr_infer.py` runs Unlimited-OCR over a single file, multiple files, or
+folders (optionally recursive). PDFs are rendered to page images with PyMuPDF and
+OCR'd page-by-page; output is one Markdown file per input (beside the source or
+under `--output-dir`). An optional trained LoRA adapter can be applied.
+
+```bash
+# Single PDF
+python Backend/ocr_infer.py /path/to/doc.pdf
+
+# A whole tree of PDFs/images, into an output folder
+python Backend/ocr_infer.py ~/Downloads --recursive --output-dir ./ocr_out
+
+# With a trained adapter, capping pages for a quick check
+python Backend/ocr_infer.py paper.pdf --adapter run/adapters/adapters.safetensors --max-pages 2
+```
+
+Flags: `--recursive`, `--output-dir`, `--model`, `--adapter`, `--prompt`
+(keep the `<image>` token), `--max-tokens`, `--dpi` (PDF render), `--max-pages`.
+Needs the mlx-vlm fork plus `pymupdf` and `pillow`. Verified on a real arXiv PDF:
+title, authors, abstract, and headings extracted with grounding boxes.
+
 ## Running the Phase 0 diagnostic
 
 The port is driven by measurement, not guesswork. In the Studio's Python env
