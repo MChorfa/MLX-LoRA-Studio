@@ -57,6 +57,9 @@ struct OCRView: View {
         .liquidGlass(cornerRadius: 18)
         .padding(16)
         .navigationTitle("OCR")
+        // HFAssetPicker (in the Model section) reads @Environment(AppStore.self);
+        // inject it for the whole OCR subtree, as the other pages do.
+        .environment(store)
     }
 }
 
