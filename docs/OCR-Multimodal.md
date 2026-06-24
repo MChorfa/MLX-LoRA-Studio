@@ -102,8 +102,18 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   re-serialized the byte-level vocab as Metaspace/SPM) is **fixed in the fork**:
   `convert` now restores the source byte-level tokenizer after save. Verified: a
   freshly converted 8-bit repo OCRs a real PDF with zero `Ġ`/`Ċ` markers.
-- **Optional next:** bit-exact logit parity vs the HF reference; multi-image
-  `batch_size > 1` (multi-crop collation currently targets 1).
+- **Multi-image `batch_size > 1` — supported.** The trainer collates multi-crop
+  `pixel_values` (`[patches, image_ori]`) element-wise across the batch and pads
+  `images_seq_mask` to the padded length, so variable-length items batch correctly.
+  Verified: a `batch_size=2` run over two different documents trains (loss
+  1.810 → 1.792); `batch_size=1` is unchanged.
+- **Parity vs the HF reference needs CUDA.** The upstream `model.infer` is
+  hardcoded to `.cuda()`, so the PyTorch reference cannot run on Apple Silicon
+  as-is (it loads, but inference asserts CUDA). It can be coaxed onto CPU by
+  mapping `.cuda()` placement to CPU, but full generation over the ~2710-token
+  vision context on a 3B MoE is impractically slow there — a meaningful bit-exact
+  comparison wants a CUDA GPU. On-device validation is therefore functional
+  (correct OCR text), not bit-exact logit parity.
 
 ## In the app: the OCR page
 
@@ -112,8 +122,9 @@ or a folder (with a **Recurse** toggle), choose the model (default
 `baidu/Unlimited-OCR`) and an optional trained LoRA adapter, tune options (prompt,
 max tokens, PDF DPI, max pages, repetition penalty), and press **Run OCR**. Output
 Markdown files are collected in a run folder (or a folder you choose), and progress
-streams live in the run console. Under the hood this launches `Backend/ocr_infer.py`
-via the same job runner used for training. The OCR model needs the mlx-vlm fork
+streams live in the run console. A **Results** section lists the produced `.md`
+files with an in-app **Preview** and **Reveal in Finder** per file. Under the hood
+this launches `Backend/ocr_infer.py` via the same job runner used for training. The OCR model needs the mlx-vlm fork
 installed in the selected Python environment (see `Backend/requirements.txt`).
 
 ## Running OCR on PDFs and images (CLI)
