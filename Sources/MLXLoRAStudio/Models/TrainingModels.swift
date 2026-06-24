@@ -5,6 +5,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case train
     case metrics
     case synthetic
+    case ocr
     case upload
     case guide
     case runs
@@ -17,6 +18,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .train: "Train"
         case .metrics: "Live Metrics"
         case .synthetic: "Synthetic Data"
+        case .ocr: "OCR"
         case .upload: "Upload to HF"
         case .guide: "Algorithm Guide"
         case .runs: "Runs"
@@ -29,6 +31,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .train: "cpu"
         case .metrics: "chart.line.uptrend.xyaxis"
         case .synthetic: "sparkles"
+        case .ocr: "doc.text.viewfinder"
         case .upload: "arrow.up.circle"
         case .guide: "book"
         case .runs: "chart.xyaxis.line"

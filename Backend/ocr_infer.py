@@ -61,17 +61,24 @@ def render_pdf_pages(pdf_path: Path, dpi: int, max_pages: int | None) -> list:
     return images
 
 
-def _ocr_image(model, processor, image, prompt: str, max_tokens: int) -> str:
+def _ocr_image(model, processor, image, args) -> str:
     from mlx_vlm import generate
 
+    kwargs = {}
+    if args.repetition_penalty and args.repetition_penalty != 1.0:
+        # Curbs the runaway empty-<table> blowups the model produces on dense
+        # figure pages (its native pipeline uses no_repeat_ngram for the same end).
+        kwargs["repetition_penalty"] = args.repetition_penalty
+        kwargs["repetition_context_size"] = args.repetition_context_size
     result = generate(
         model=model,
         processor=processor,
         image=image,
-        prompt=prompt,
-        max_tokens=max_tokens,
+        prompt=args.prompt,
+        max_tokens=args.max_tokens,
         temperature=0.0,
         verbose=False,
+        **kwargs,
     )
     return getattr(result, "text", str(result))
 
@@ -86,14 +93,14 @@ def ocr_file(model, processor, path: Path, args, scratch: Path) -> str:
         sections = []
         for number, image in enumerate(pages, start=1):
             started = time.monotonic()
-            text = _ocr_image(model, processor, image, args.prompt, args.max_tokens)
+            text = _ocr_image(model, processor, image, args)
             _log(f"  page {number}/{len(pages)}: {len(text)} chars "
                  f"({time.monotonic() - started:.1f}s)")
             sections.append(f"<!-- page {number} -->\n\n{text}")
         return "\n\n---\n\n".join(sections)
 
     image = Image.open(path).convert("RGB")
-    return _ocr_image(model, processor, image, args.prompt, args.max_tokens)
+    return _ocr_image(model, processor, image, args)
 
 
 def output_path_for(path: Path, output_dir: Path | None) -> Path:
@@ -126,6 +133,13 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=4000)
     parser.add_argument("--dpi", type=int, default=144, help="PDF render DPI")
     parser.add_argument("--max-pages", type=int, default=None, help="Limit pages per PDF")
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.0,
+        help="Penalty (>1) to curb repetition on dense pages; 1.0 disables it",
+    )
+    parser.add_argument("--repetition-context-size", type=int, default=20)
     args = parser.parse_args()
 
     inputs = collect_inputs(args.paths, args.recursive)

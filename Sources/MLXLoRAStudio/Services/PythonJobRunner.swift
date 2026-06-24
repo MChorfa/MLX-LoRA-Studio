@@ -8,6 +8,7 @@ enum RunnerError: LocalizedError {
     case invalidPackagePath
     case invalidSyntheticResumeOutput
     case cannotWriteConfig
+    case invalidOCRInput
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ enum RunnerError: LocalizedError {
         case .invalidPackagePath: "The mlx-lm-lora package path does not exist."
         case .invalidSyntheticResumeOutput: "The synthetic resume folder does not exist."
         case .cannotWriteConfig: "The training config could not be written."
+        case .invalidOCRInput: "Choose a PDF/image file or a folder to OCR."
         }
     }
 }
@@ -283,6 +285,64 @@ final class PythonJobRunner {
             huggingFaceToken: huggingFaceToken,
             onCompletion: onCompletion
         )
+    }
+
+    func startOCR(
+        config: OCRConfig,
+        pythonExecutable: String,
+        packagePath: String,
+        workingDirectory: String,
+        outputRoot: String,
+        huggingFaceToken: String? = nil,
+        onCompletion: (@MainActor (Int32) -> Void)? = nil
+    ) async throws -> String {
+        guard !isRunning else { throw RunnerError.alreadyRunning }
+        prepareRun()
+        let workURL = URL(fileURLWithPath: workingDirectory)
+        guard FileManager.default.fileExists(atPath: workURL.path) else {
+            throw RunnerError.invalidWorkingDirectory
+        }
+        let input = config.inputPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { throw RunnerError.invalidOCRInput }
+
+        let resolvedOutputDir = try resolveOCROutputDir(config: config, outputRoot: outputRoot)
+        configureProgress(total: nil, label: "OCR")
+        appendSystemLine("OCR output: \(resolvedOutputDir)")
+
+        let args = config.runArguments(resolvedOutputDir: resolvedOutputDir)
+        return try await launch(
+            pythonExecutable: pythonExecutable,
+            arguments: args,
+            packagePath: packagePath,
+            workingDirectory: workingDirectory,
+            displayCommand: "OCR \(URL(fileURLWithPath: input).lastPathComponent)",
+            huggingFaceToken: huggingFaceToken,
+            onCompletion: onCompletion
+        )
+    }
+
+    /// Decide where OCR `.md` files land: a user-chosen folder, or a fresh run
+    /// folder under the output root. Sets `lastRunFolder` so the console links it.
+    private func resolveOCROutputDir(config: OCRConfig, outputRoot: String) throws -> String {
+        let chosen = config.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directory: URL
+        if chosen.isEmpty {
+            let runURL = try makeRunFolder(
+                outputRoot: outputRoot,
+                folderName: RunFolderNamer.makeName(pieces: ["ocr"], date: Date())
+            )
+            directory = runURL.appending(path: "ocr-output", directoryHint: .isDirectory)
+            lastRunFolder = runURL.path
+        } else {
+            directory = URL(fileURLWithPath: NSString(string: chosen).expandingTildeInPath, isDirectory: true)
+            lastRunFolder = directory.path
+        }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            throw RunnerError.invalidOutputRoot
+        }
+        return directory.path
     }
 
     func startPackageUpdate(

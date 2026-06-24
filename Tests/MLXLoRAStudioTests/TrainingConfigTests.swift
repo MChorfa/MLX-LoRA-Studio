@@ -154,6 +154,43 @@ struct TrainingConfigTests {
         #expect(config.ocrInferenceMode == .base)
     }
 
+    @Test("OCR run arguments include only the set options by default")
+    func ocrRunArgumentsDefault() throws {
+        var config = OCRConfig()
+        config.inputPath = "/docs/a.pdf"
+
+        let args = config.runArguments(resolvedOutputDir: "/out")
+
+        #expect(args.first == "Backend/ocr_infer.py")
+        #expect(args.contains("/docs/a.pdf"))
+        #expect(args.contains("--output-dir"))
+        #expect(args.contains("/out"))
+        // Defaults: no recursion, no adapter, no max-pages, no repetition flags.
+        #expect(!args.contains("--recursive"))
+        #expect(!args.contains("--adapter"))
+        #expect(!args.contains("--max-pages"))
+        #expect(!args.contains("--repetition-penalty"))
+    }
+
+    @Test("OCR run arguments include recursion, adapter, pages, and repetition")
+    func ocrRunArgumentsFull() throws {
+        var config = OCRConfig()
+        config.inputPath = "~/Downloads"
+        config.recursive = true
+        config.adapterPath = "/run/adapters/adapters.safetensors"
+        config.maxPages = 3
+        config.repetitionPenalty = 1.05
+        config.repetitionContextSize = 25
+
+        let args = config.runArguments(resolvedOutputDir: "/out")
+
+        #expect(args.contains("--recursive"))
+        #expect(zip(args, args.dropFirst()).contains { $0 == "--adapter" && $1 == "/run/adapters/adapters.safetensors" })
+        #expect(zip(args, args.dropFirst()).contains { $0 == "--max-pages" && $1 == "3" })
+        #expect(zip(args, args.dropFirst()).contains { $0 == "--repetition-penalty" && $1 == "1.05" })
+        #expect(zip(args, args.dropFirst()).contains { $0 == "--repetition-context-size" && $1 == "25" })
+    }
+
     @Test("OCR defaults are sensible when family is multimodal")
     func ocrDefaultsAreSensible() throws {
         var config = TrainingConfig()

@@ -99,7 +99,18 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   MLX repo; bit-exact logit parity vs the HF reference; multi-image batch_size > 1
   (currently the multi-crop collation targets batch_size 1).
 
-## Running OCR on PDFs and images
+## In the app: the OCR page
+
+The Studio has a dedicated **OCR** sidebar page (`OCRView`). Pick a PDF/image file
+or a folder (with a **Recurse** toggle), choose the model (default
+`baidu/Unlimited-OCR`) and an optional trained LoRA adapter, tune options (prompt,
+max tokens, PDF DPI, max pages, repetition penalty), and press **Run OCR**. Output
+Markdown files are collected in a run folder (or a folder you choose), and progress
+streams live in the run console. Under the hood this launches `Backend/ocr_infer.py`
+via the same job runner used for training. The OCR model needs the mlx-vlm fork
+installed in the selected Python environment (see `Backend/requirements.txt`).
+
+## Running OCR on PDFs and images (CLI)
 
 `Backend/ocr_infer.py` runs Unlimited-OCR over a single file, multiple files, or
 folders (optionally recursive). PDFs are rendered to page images with PyMuPDF and

@@ -14,9 +14,11 @@ final class AppStore {
     var training = TrainingConfig()
     var synthetic = SyntheticConfig()
     var hfUpload = HFUploadConfig()
+    var ocr = OCRConfig()
     var trainingRunner = PythonJobRunner()
     var syntheticRunner = PythonJobRunner()
     var hfUploadRunner = PythonJobRunner()
+    var ocrRunner = PythonJobRunner()
     var packageRunner = PythonJobRunner()
     var runs: [RunRecord] = []
     /// Runs that the runner has written to the output root in previous
@@ -445,6 +447,8 @@ final class AppStore {
             await startTraining()
         case .synthetic:
             await startSynthetic()
+        case .ocr:
+            await startOCR()
         case .upload:
             await startHFUpload()
         case .metrics, .guide, .runs, .about:
@@ -531,6 +535,33 @@ final class AppStore {
             )
         } catch {
             syntheticRunner.appendSystemLine("Could not start synthetic job: \(error.localizedDescription)")
+        }
+    }
+
+    func startOCR() async {
+        let runID = UUID()
+        do {
+            let command = try await ocrRunner.startOCR(
+                config: ocr,
+                pythonExecutable: pythonExecutable,
+                packagePath: packagePath,
+                workingDirectory: workingDirectory,
+                outputRoot: outputRoot,
+                huggingFaceToken: huggingFaceToken(),
+                onCompletion: jobCompletionHandler(
+                    runID: runID,
+                    successTitle: "OCR finished",
+                    failureTitle: "OCR stopped",
+                    successBody: "The OCR job has completed.",
+                    failureBody: "The OCR job exited before completing successfully."
+                )
+            )
+            runs.insert(
+                RunRecord(id: runID, title: "OCR", command: command, startedAt: .now, status: "Running"),
+                at: 0
+            )
+        } catch {
+            ocrRunner.appendSystemLine("Could not start OCR: \(error.localizedDescription)")
         }
     }
 
@@ -648,6 +679,8 @@ final class AppStore {
             trainingRunner
         case .synthetic:
             syntheticRunner
+        case .ocr:
+            ocrRunner
         case .upload:
             hfUploadRunner
         case .metrics:
@@ -658,7 +691,7 @@ final class AppStore {
     }
 
     var allJobRunners: [PythonJobRunner] {
-        [trainingRunner, syntheticRunner, hfUploadRunner, packageRunner]
+        [trainingRunner, syntheticRunner, hfUploadRunner, ocrRunner, packageRunner]
     }
 
     var anyJobRunning: Bool {
@@ -667,7 +700,7 @@ final class AppStore {
 
     var canStartSelectedJob: Bool {
         switch selection {
-        case .train, .synthetic, .upload:
+        case .train, .synthetic, .ocr, .upload:
             true
         case .metrics, .guide, .runs, .about:
             false
