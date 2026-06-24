@@ -243,7 +243,10 @@ class TrainingRunnerTests(unittest.TestCase):
         self.assertFalse(args.freeze_vision_tower)
         self.assertEqual(args.ocr_inference_mode, "base")
 
-    def test_multimodal_family_fails_loud_until_trainer_lands(self):
+    def test_multimodal_family_routes_to_run_multimodal(self):
+        # The multimodal family dispatches to run_multimodal, which fails loud
+        # with a clear message when the mlx-vlm fork is not installed (it is not
+        # part of the test stubs) rather than routing through the text pipelines.
         runner, _stubs = load_training_runner()
 
         args = runner._normalize_spec(
@@ -255,8 +258,9 @@ class TrainingRunnerTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(RuntimeError) as ctx:
             runner.run(args)
+        self.assertIn("mlx-vlm", str(ctx.exception))
 
     def test_every_training_algorithm_dispatches_to_its_pipeline(self):
         expected_extra_args = {

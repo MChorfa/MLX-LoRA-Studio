@@ -5,12 +5,12 @@ The **OCR / Multimodal** model family runs a *true* multimodal LoRA fine-tune on
 [`baidu/Unlimited-OCR`](https://huggingface.co/baidu/Unlimited-OCR).
 
 > **Status (read this first).**
-> This is **partially implemented**. The Studio UI, run-spec contract, and backend
-> spec-parsing are wired and tested. The actual training loop (an MLX-VLM image-text
-> trainer plus an MLX port of the `unlimited-ocr` architecture) is **not yet active** —
-> selecting this family and starting a run currently aborts with a clear
-> `NotImplementedError` rather than silently mis-training. See "Implementation status"
-> below.
+> Image-text LoRA fine-tuning is **wired end-to-end and verified**: a short run on
+> `baidu/Unlimited-OCR` completes with decreasing loss and live metrics, using the
+> MLX-VLM trainer plus the `unlimited_ocr` package in the pinned mlx-vlm fork. It
+> requires that fork installed (see `Backend/requirements.txt`); without it the
+> backend fails loud. The vision tower is non-trainable in MLX (its custom kernel
+> has no backward), so OCR LoRA trains the language model with vision frozen.
 
 ## How it differs from the Vision-Language family
 
@@ -90,13 +90,14 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   `Model + UnlimitedOCRProcessor`, and `generate()` on a synthetic document
   recovers the rendered text exactly, with DeepSeek-OCR grounding boxes. This is
   functional OCR validation (not bit-exact logit parity vs the torch reference).
-- **Pending (next):**
-  1. The image-text dataset loader/collator and the MLX-VLM LoRA training loop
-     (`run_multimodal` in `Backend/training_runner.py`), replacing the fail-loud guard.
-  2. Optional: weight conversion (`mlx_vlm.convert`) to publish a quantized MLX repo,
-     and a bit-exact parity check vs the HF reference.
-
-Until the trainer lands, the backend fails loud when this family is selected.
+- **Trainer done (verified).** `run_multimodal` in `Backend/training_runner.py`
+  loads the dataset, builds the MLX-VLM `TrainingArgs`, runs LoRA training via the
+  MLX-VLM `train()` loop, and tees its output into `@@studio_metric` events for
+  Live Metrics. Verified: a 2-step run on a synthetic document fixture completed
+  with loss 2.410 -> 2.329 and saved adapters.
+- **Optional next:** weight conversion (`mlx_vlm.convert`) to publish a quantized
+  MLX repo; bit-exact logit parity vs the HF reference; multi-image batch_size > 1
+  (currently the multi-crop collation targets batch_size 1).
 
 ## Running the Phase 0 diagnostic
 

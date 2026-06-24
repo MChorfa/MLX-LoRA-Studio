@@ -836,6 +836,189 @@ PIPELINES = {
 }
 
 
+class _StudioMetricStream:
+    """Tee MLX-VLM trainer stdout: parse ``Iter N: Train/Val loss ...`` lines into
+    ``@@studio_metric`` events (so Live Metrics works), forward the rest raw."""
+
+    _ITER = re.compile(
+        r"Iter\s+(\d+):\s+(Train|Val)\s+loss\s+([-\d.eE+]+)"
+        r"(?:.*?Learning Rate\s+([-\d.eE+]+))?"
+        r"(?:.*?It/sec\s+([-\d.eE+]+))?"
+        r"(?:.*?Tokens/sec\s+([-\d.eE+]+))?"
+        r"(?:.*?Peak mem\s+([-\d.eE+]+))?"
+    )
+
+    def __init__(self, callback, stream=STUDIO_OUT) -> None:
+        self.callback = callback
+        self.stream = stream
+        self._buf = ""
+
+    def write(self, text: str) -> int:
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._handle(line)
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def _handle(self, line: str) -> None:
+        clean = _strip_ansi(line)
+        match = self._ITER.search(clean)
+        if not match:
+            self.stream.write(line + "\n")
+            return
+        kind = match.group(2).lower()
+        payload: dict[str, Any] = {"iteration": int(match.group(1))}
+        payload["train_loss" if kind == "train" else "val_loss"] = float(match.group(3))
+        for idx, key in (
+            (4, "learning_rate"),
+            (5, "iterations_per_second"),
+            (6, "tokens_per_second"),
+            (7, "peak_memory"),
+        ):
+            if match.group(idx):
+                payload[key] = float(match.group(idx))
+        if kind == "train":
+            self.callback.on_train_loss_report(payload)
+        else:
+            self.callback.on_val_loss_report(payload)
+
+
+def _ocr_messages(prompt: str, target: str) -> list[dict[str, str]]:
+    # The image token is added by the chat template (IMAGE_TOKEN_NEWLINE format),
+    # so strip any literal <image> from the instruction to avoid a double token
+    # (the processor asserts one image token per image).
+    instruction = prompt.replace("<image>", "").strip()
+    return [
+        {"role": "user", "content": instruction},
+        {"role": "assistant", "content": target},
+    ]
+
+
+def _load_ocr_rows(path: Path, image_root: str, prompt_template: str) -> list[dict]:
+    from PIL import Image
+
+    rows: list[dict] = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            raw = raw.strip()
+            if not raw:
+                continue
+            item = json.loads(raw)
+            refs = item.get("image") or item.get("images") or []
+            if isinstance(refs, str):
+                refs = [refs]
+            images = [
+                Image.open(os.path.join(image_root, ref)).convert("RGB") for ref in refs
+            ]
+            prompt = item.get("prompt") or prompt_template
+            target = item.get("target") or item.get("answer") or ""
+            rows.append(
+                {
+                    "messages": _ocr_messages(prompt, target),
+                    "image": images[0] if len(images) == 1 else images,
+                }
+            )
+    return rows
+
+
+def run_multimodal(
+    args: SimpleNamespace, studio_callback: StudioCallback, guard: ResourceGuard
+) -> None:
+    """Image-text LoRA fine-tune via the MLX-VLM trainer (e.g. Unlimited-OCR)."""
+    try:
+        from mlx_vlm import load as vlm_load
+        from mlx_vlm.lora import setup_model_for_training
+        from mlx_vlm.trainer.datasets import VisionDataset
+        from mlx_vlm.trainer.sft_trainer import TrainingArgs, train
+    except ImportError as exc:
+        raise RuntimeError(
+            "OCR / multimodal training needs the mlx-vlm fork that provides the "
+            "unlimited_ocr model package. See Backend/requirements.txt."
+        ) from exc
+
+    data_dir = _prepare_local_dataset_for_trainer(str(args.data))
+    image_root = args.image_root or data_dir
+    train_path = Path(data_dir) / "train.jsonl"
+    if not train_path.exists():
+        raise ValueError(f"No train.jsonl found under {data_dir} for OCR training.")
+    train_rows = _load_ocr_rows(train_path, image_root, args.prompt_template)
+    valid_path = Path(data_dir) / "valid.jsonl"
+    valid_rows = (
+        _load_ocr_rows(valid_path, image_root, args.prompt_template)
+        if valid_path.exists()
+        else None
+    )
+    studio_log(
+        f"Loaded {len(train_rows)} OCR training rows"
+        + (f", {len(valid_rows)} validation rows" if valid_rows else "")
+    )
+
+    studio_log("Loading OCR model")
+    with quiet_vendor_output():
+        model, processor = vlm_load(args.model)
+    guard.release_caches()
+    guard.check("loading the OCR model")
+
+    setup_ns = SimpleNamespace(
+        full_finetune=args.train_type == "full",
+        train_vision=not bool(getattr(args, "freeze_vision_tower", True)),
+        lora_rank=int(args.lora_parameters["rank"]),
+        lora_alpha=float(args.lora_parameters.get("scale", 16.0)),
+        lora_dropout=float(args.lora_parameters.get("dropout", 0.0)),
+    )
+    with quiet_vendor_output():
+        model = setup_model_for_training(model, setup_ns)
+    # DeepSeek-OCR's vision kernel has no backward; only train it when explicitly
+    # unfrozen (otherwise the model stop_gradients the vision features).
+    setattr(model, "_train_vision", setup_ns.train_vision)
+
+    config = getattr(model, "config", None)
+    config = config.__dict__ if hasattr(config, "__dict__") else dict(config or {})
+    train_on_completions = bool(getattr(args, "mask_prompt", True))
+    train_set = VisionDataset(
+        train_rows, config, processor, train_on_completions=train_on_completions
+    )
+    valid_set = (
+        VisionDataset(
+            valid_rows, config, processor, train_on_completions=train_on_completions
+        )
+        if valid_rows
+        else None
+    )
+
+    iters = args.iters if args.iters is not None else _iters(args, train_rows)
+    Path(args.adapter_path).mkdir(parents=True, exist_ok=True)
+    training_args = TrainingArgs(
+        batch_size=args.batch_size,
+        iters=iters,
+        val_batches=args.val_batches,
+        steps_per_report=args.steps_per_report,
+        steps_per_eval=args.steps_per_eval,
+        steps_per_save=args.save_every,
+        max_seq_length=args.max_seq_length,
+        adapter_file=str(Path(args.adapter_path) / "adapters.safetensors"),
+        grad_checkpoint=args.grad_checkpoint,
+        learning_rate=args.learning_rate,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+    )
+    opt = _optimizer(args)
+    studio_log(f"OCR training started ({iters} iterations)")
+    sink = _StudioMetricStream(studio_callback)
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        train(
+            model=model,
+            optimizer=opt,
+            train_dataset=train_set,
+            val_dataset=valid_set,
+            args=training_args,
+            train_on_completions=train_on_completions,
+        )
+    studio_log(f"Run complete. Outputs saved under {args.adapter_path}")
+
+
 def run(args: SimpleNamespace) -> None:
     np.random.seed(args.seed)
     mx.random.seed(args.seed)
@@ -867,16 +1050,10 @@ def run(args: SimpleNamespace) -> None:
             raise ValueError("VLM mode needs an original VLM repo or local folder.")
         studio_log(f"Original VLM for final export: {args.vlm_model}")
     if args.model_family == "multimodal":
-        # TODO(ckodex): wire the MLX-VLM multimodal LoRA trainer (Phase 3 of the
-        # Unlimited-OCR support plan). Until the ported `unlimited_ocr` MLX model
-        # and the image-text training loop land, fail loud rather than silently
-        # routing image-text OCR runs through the text-only pipelines below.
-        raise NotImplementedError(
-            "OCR / multimodal training is not yet wired in this backend. It "
-            "requires the ported MLX-VLM model + image-text trainer (see the "
-            "Unlimited-OCR support plan, Phases 0-3). The run spec is accepted "
-            "and round-trips, but the trainer is pending."
-        )
+        # True image-text LoRA via the MLX-VLM trainer (separate code path from
+        # the text-only mlx-lm-lora pipelines below).
+        run_multimodal(args, studio_callback, guard)
+        return
 
     studio_log("Loading model")
     with quiet_vendor_output():
