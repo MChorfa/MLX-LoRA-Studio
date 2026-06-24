@@ -27,6 +27,7 @@ BUILD_BINARY="$DIST_DIR/$APP_NAME"
 swiftc \
   "$ROOT_DIR/Sources/MLXLoRAStudio/App/MLXLoRAStudioApp.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Models/TrainingModels.swift" \
+  "$ROOT_DIR/Sources/MLXLoRAStudio/Models/OCRConfig.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Models/PythonEnvironment.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Support/MemoryEstimator.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Support/LiveMemoryMonitor.swift" \
@@ -44,6 +45,7 @@ swiftc \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/SidebarView.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/TrainingView.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/SyntheticDataView.swift" \
+  "$ROOT_DIR/Sources/MLXLoRAStudio/Views/OCRView.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/HFUploadView.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/AlgorithmGuideView.swift" \
   "$ROOT_DIR/Sources/MLXLoRAStudio/Views/RunsView.swift" \
