@@ -33,15 +33,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Weight-key name prefixes MLX-VLM's deepseekocr_2 loader expects. Sourced by
-# reading mlx_vlm/models/deepseekocr_2/* — treat as a STARTING reference, not
-# ground truth; `compare` reports the actual delta against the live model.
-# TODO(ckodex): refresh these against the installed mlx-vlm version before relying on them.
-DEEPSEEKOCR2_EXPECTED_PREFIXES = (
-    "language_model.",
-    "vision_model.",
-    "projector.",
-)
+# Measured against mlx-vlm's deepseekocr_2 loader via `probe-load` (2026-06):
+# aliasing model_type -> deepseekocr_2 loads the DeepSeek-V2 MLA+MoE language
+# stack, the SAM tower, and the projector cleanly; the ONLY unmapped subtree is
+# the CLIP-L vision tower below (294 tensors). That subtree is the port gap.
+PORT_GAP_PREFIXES = ("model.vision_model.",)
 
 
 def _log(message: str) -> None:
@@ -122,27 +118,26 @@ def cmd_compare(args: argparse.Namespace) -> int:
     model_dir = _download(args.repo, args.revision)
     keys = _weight_keys(model_dir)
 
-    matched = [k for k in keys if k.startswith(DEEPSEEKOCR2_EXPECTED_PREFIXES)]
-    unmatched = [k for k in keys if not k.startswith(DEEPSEEKOCR2_EXPECTED_PREFIXES)]
+    gap = [k for k in keys if k.startswith(PORT_GAP_PREFIXES)]
+    covered = [k for k in keys if not k.startswith(PORT_GAP_PREFIXES)]
 
     _log(
-        f"keys matching deepseekocr_2 prefixes: {len(matched)} / {len(keys)} "
-        f"({100 * len(matched) / max(len(keys), 1):.0f}%)"
+        f"covered by deepseekocr_2 loader: {len(covered)} / {len(keys)} "
+        f"({100 * len(covered) / max(len(keys), 1):.0f}%)"
     )
-    _log("UNMATCHED key buckets (these need port work):")
-    for bucket, count in _prefix_histogram(unmatched).items():
-        print(f"    {bucket:<40} {count}")
+    _log(f"PORT GAP — CLIP-L vision tower ({len(gap)} tensors), bucket detail:")
+    for bucket, count in _prefix_histogram(gap, depth=4).items():
+        print(f"    {bucket:<48} {count}")
     _log(
-        "Paste the unmatched buckets back: each is a sub-module the MLX "
-        "`unlimited_ocr` package must implement or remap."
+        "The gap subtree is a standard CLIP ViT (embeddings + pre_layrnorm + "
+        "transformer.layers.*). Implement/reuse it in the MLX `unlimited_ocr` "
+        "package, then re-run probe-load to confirm a clean load."
     )
     return 0
 
 
 def cmd_probe_load(args: argparse.Namespace) -> int:
     model_dir = _download(args.repo, args.revision)
-    if args.alias_model_type:
-        _alias_model_type(model_dir, args.alias_model_type)
 
     try:
         from mlx_vlm.utils import load
@@ -151,45 +146,55 @@ def cmd_probe_load(args: argparse.Namespace) -> int:
             "mlx-vlm is required for probe-load. Install it in the Studio env."
         ) from exc
 
+    config_path = model_dir / "config.json"
+    original_bytes = config_path.read_bytes() if args.alias_model_type else None
     try:
+        if args.alias_model_type:
+            _alias_model_type(config_path, args.alias_model_type)
         model, _processor = load(str(model_dir), strict=False)
     except Exception as exc:  # noqa: BLE001 - we want the raw failure surfaced
         _log(f"LOAD FAILED: {type(exc).__name__}: {exc}")
         _log(
-            "A failure here is expected pre-port. The exception names the first "
-            "missing module / key — that is the next thing to implement."
+            "A failure here is expected pre-port. The exception names the "
+            "missing modules / keys — that is the work-list to implement."
         )
         return 1
+    finally:
+        # Always restore the cached config; never leave the shared HF cache mutated.
+        if original_bytes is not None:
+            config_path.write_bytes(original_bytes)
     _log(f"LOAD OK with alias={args.alias_model_type!r}: {type(model).__name__}")
     _log("Next gate: run a forward pass and compare logits vs the HF reference.")
     return 0
 
 
-def _alias_model_type(model_dir: Path, alias: str) -> None:
-    """Write a sibling config with model_type rewritten, to probe the loader.
+def _alias_model_type(config_path: Path, alias: str) -> None:
+    """Rewrite config.json's model_type in place to probe a registered loader.
 
-    Never overwrites the original config.json — writes config.aliased.json and
-    swaps it in place only for the probe, restoring on exit.
+    The caller is responsible for restoring the original bytes (see
+    cmd_probe_load's finally block) so the shared HF cache is never left mutated.
     """
-    config_path = model_dir / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     original = config.get("model_type")
     config["model_type"] = alias
-    backup = model_dir / "config.original.json"
-    if not backup.exists():
-        backup.write_text(json.dumps(config | {"model_type": original}), encoding="utf-8")
     config_path.write_text(json.dumps(config), encoding="utf-8")
-    _log(f"Aliased model_type {original!r} -> {alias!r} (backup: {backup.name})")
+    _log(f"Aliased model_type {original!r} -> {alias!r} (will restore after probe)")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="baidu/Unlimited-OCR", help="HF repo id")
-    parser.add_argument("--revision", default=None, help="Optional git revision")
+    # Shared options live on a parent parser so they are accepted *after* the
+    # subcommand, e.g. `inspect --repo baidu/Unlimited-OCR` (the documented form).
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--repo", default="baidu/Unlimited-OCR", help="HF repo id")
+    common.add_argument("--revision", default=None, help="Optional git revision")
+
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("inspect", help="Dump config + weight key inventory")
-    sub.add_parser("compare", help="Diff keys vs deepseekocr_2 expectations")
-    probe = sub.add_parser("probe-load", help="Attempt an MLX-VLM load")
+    sub.add_parser("inspect", parents=[common], help="Dump config + weight key inventory")
+    sub.add_parser("compare", parents=[common], help="Diff keys vs deepseekocr_2 expectations")
+    probe = sub.add_parser(
+        "probe-load", parents=[common], help="Attempt an MLX-VLM load"
+    )
     probe.add_argument(
         "--alias-model-type",
         default=None,
