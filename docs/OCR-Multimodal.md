@@ -107,13 +107,26 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
   `images_seq_mask` to the padded length, so variable-length items batch correctly.
   Verified: a `batch_size=2` run over two different documents trains (loss
   1.810 → 1.792); `batch_size=1` is unchanged.
-- **Parity vs the HF reference needs CUDA.** The upstream `model.infer` is
-  hardcoded to `.cuda()`, so the PyTorch reference cannot run on Apple Silicon
-  as-is (it loads, but inference asserts CUDA). It can be coaxed onto CPU by
-  mapping `.cuda()` placement to CPU, but full generation over the ~2710-token
-  vision context on a 3B MoE is impractically slow there — a meaningful bit-exact
-  comparison wants a CUDA GPU. On-device validation is therefore functional
-  (correct OCR text), not bit-exact logit parity.
+- **Parity vs the HF reference — runs on Metal via a device adapter.** The
+  upstream `model.infer` is hardcoded to CUDA (`.cuda()`, bf16, `torch.autocast
+  ("cuda")`), so it won't run on Apple Silicon as-is. `Backend/device_adapter.py`
+  is a hexagonal **ports-and-adapters** layer (CUDA / Metal-MPS / CPU / NPU): an
+  adapter's `install()` reroutes those hardcoded calls onto the chosen backend.
+  `Backend/ocr_parity.py` uses it to run the reference:
+
+  ```bash
+  python Backend/ocr_parity.py --image page.png --device metal
+  ```
+
+  Verified: the reference runs on **Metal in ~25s** and extracts the **same text**
+  as the MLX port (e.g. "INVOICE 2026" / "Total: $1,234.56") — **functional
+  parity**. It is not bit-exact: the Metal run is float32 (MPS bf16-conv support is
+  incomplete) vs the MLX bf16 port, so layout grouping and bounding boxes differ
+  slightly. A bf16-vs-bf16 bit-exact comparison still wants a CUDA GPU. NPU is real
+  only where torch exposes one (Ascend `torch_npu`); Apple's Neural Engine needs
+  CoreML, so that adapter is a documented stub.
+  Reference deps (torch, `transformers==4.57.1`, addict, easydict, …) are heavy and
+  parity-only, so they are not in `requirements.txt`.
 
 ## In the app: the OCR page
 
