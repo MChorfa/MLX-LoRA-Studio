@@ -73,15 +73,16 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
 - **Phase 0 measured (GO verdict).** Running `Backend/convert_unlimited_ocr.py`
   against the real model established:
   - `model_type: unlimited-ocr`, arch `UnlimitedOCRForCausalLM`; 2710 weight tensors.
-  - Aliasing `model_type → deepseekocr_2` loads **89% (2417/2710)** of tensors:
-    the DeepSeek-V2 MLA+MoE language stack, the SAM tower, and the projector all map.
-  - **The entire port gap is one subtree:** `model.vision_model.*` — a standard
-    **CLIP-L ViT** (293 tensors: embeddings + `pre_layrnorm` + 24 transformer layers).
-    `deepseekocr_2` is SAM-only; `unlimited-ocr`'s `deeplip_b_l` adds the CLIP tower.
+  - The original **`deepseekocr` (v1)** MLX package (SAM + CLIP DeepEncoder) is the
+    correct base: aliasing `model_type → deepseekocr` and calling `load_model`
+    returns a `Model` with **no missing/extra parameters** — the full DeepSeek-V2
+    MLA+MoE language stack, SAM tower, CLIP tower, and projector all map.
+    (`deepseekocr_2` dropped CLIP, so it left a 293-tensor gap; v1 does not.)
 - **Pending (next, requires Apple-Silicon GPU):**
-  1. MLX `unlimited_ocr` package = `deepseekocr_2` + a CLIP-L ViT vision tower
-     (reuse an existing MLX-VLM CLIP impl) + the `model.*` weight-key remap.
-  2. Weight conversion + a forward-pass parity check vs the HF reference.
+  1. MLX `unlimited_ocr` package in a pinned mlx-vlm fork: register
+     `model_type: unlimited-ocr`, reuse v1 `deepseekocr` modules, map the config
+     fields, and supply the processor (v1 `DeepseekOCRProcessor`).
+  2. A forward-pass parity check vs the HF reference.
   3. The image-text dataset loader/collator and the MLX-VLM LoRA training loop
      (`run_multimodal` in `Backend/training_runner.py`).
 

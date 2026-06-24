@@ -140,7 +140,7 @@ def cmd_probe_load(args: argparse.Namespace) -> int:
     model_dir = _download(args.repo, args.revision)
 
     try:
-        from mlx_vlm.utils import load
+        from mlx_vlm.utils import load, load_model
     except ImportError as exc:  # pragma: no cover - environment guard
         raise SystemExit(
             "mlx-vlm is required for probe-load. Install it in the Studio env."
@@ -151,7 +151,11 @@ def cmd_probe_load(args: argparse.Namespace) -> int:
     try:
         if args.alias_model_type:
             _alias_model_type(config_path, args.alias_model_type)
-        model, _processor = load(str(model_dir), strict=False)
+        if args.model_only:
+            # Isolate weight/architecture mapping from processor instantiation.
+            model = load_model(model_dir, strict=False)
+        else:
+            model, _processor = load(str(model_dir), strict=False)
     except Exception as exc:  # noqa: BLE001 - we want the raw failure surfaced
         _log(f"LOAD FAILED: {type(exc).__name__}: {exc}")
         _log(
@@ -199,6 +203,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--alias-model-type",
         default=None,
         help="Rewrite config model_type to this registered arch before loading",
+    )
+    probe.add_argument(
+        "--model-only",
+        action="store_true",
+        help="Call load_model (weights/architecture only), skipping the processor",
     )
     return parser
 
