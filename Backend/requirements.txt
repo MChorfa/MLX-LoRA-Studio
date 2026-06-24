@@ -1,3 +1,14 @@
 mlx
 mlx-lm-lora
 matplotlib
+
+# OCR / Multimodal family (baidu/Unlimited-OCR) — OPTIONAL, not yet enabled.
+# Requires a fork of mlx-vlm that adds the `unlimited_ocr` model package
+# (model_type: unlimited-ocr). The architecture load is verified; the processor,
+# weight conversion, parity check, and trainer are still in progress, so this is
+# intentionally left commented out (a plain `mlx-vlm` would install upstream,
+# which lacks the unlimited_ocr package).
+# Install the fork editable for development:
+#   uv pip install -e /path/to/mlx-vlm        # branch: feat/unlimited-ocr
+# TODO(ckodex): replace with the pinned fork URL once published, e.g.
+#   mlx-vlm @ git+https://github.com/<org>/mlx-vlm@feat/unlimited-ocr

@@ -78,11 +78,16 @@ The UI emits these keys into the run spec (consumed by `Backend/training_runner.
     returns a `Model` with **no missing/extra parameters** — the full DeepSeek-V2
     MLA+MoE language stack, SAM tower, CLIP tower, and projector all map.
     (`deepseekocr_2` dropped CLIP, so it left a 293-tensor gap; v1 does not.)
+- **Phase 1 done (architecture load, verified).** An `unlimited_ocr` package was
+  added to a fork of mlx-vlm (branch `feat/unlimited-ocr`): it re-exports the v1
+  `deepseekocr` modules, and a `MODEL_REMAPPING` entry resolves the hyphenated
+  `model_type`. `load_model` on the real checkpoint (no alias) returns a `Model`
+  with a clean weight load. See `Backend/requirements.txt` for the fork pin.
 - **Pending (next, requires Apple-Silicon GPU):**
-  1. MLX `unlimited_ocr` package in a pinned mlx-vlm fork: register
-     `model_type: unlimited-ocr`, reuse v1 `deepseekocr` modules, map the config
-     fields, and supply the processor (v1 `DeepseekOCRProcessor`).
-  2. A forward-pass parity check vs the HF reference.
+  1. Processor: Unlimited-OCR ships a custom `trust_remote_code` processor that
+     `AutoProcessor` can't auto-instantiate; wire/reuse the v1 `DeepseekOCRProcessor`
+     so full `load()` (model + processor) succeeds.
+  2. Weight conversion (HF → MLX) + a forward-pass parity check vs the HF reference.
   3. The image-text dataset loader/collator and the MLX-VLM LoRA training loop
      (`run_multimodal` in `Backend/training_runner.py`).
 
