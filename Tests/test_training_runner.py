@@ -216,6 +216,47 @@ class TrainingRunnerTests(unittest.TestCase):
         self.assertTrue(args.fuse_remove_adapters)
         self.assertIsNone(getattr(args, "vlm_model", None))
         self.assertIsNone(getattr(args, "vlm_output_path", None))
+        # OCR/multimodal defaults are present even for text runs.
+        self.assertEqual(args.prompt_template, "<image>document parsing.")
+        self.assertTrue(args.freeze_vision_tower)
+        self.assertEqual(args.ocr_inference_mode, "gundam")
+        self.assertIsNone(getattr(args, "image_root", None))
+
+    def test_normalize_spec_preserves_ocr_multimodal_settings(self):
+        runner, _stubs = load_training_runner()
+
+        args = runner._normalize_spec(
+            {
+                "model": "baidu/Unlimited-OCR",
+                "model_family": "multimodal",
+                "adapter_path": "adapters",
+                "image_root": "/tmp/docs/images",
+                "prompt_template": "<image>OCR this.",
+                "freeze_vision_tower": False,
+                "ocr_inference_mode": "base",
+            }
+        )
+
+        self.assertEqual(args.model_family, "multimodal")
+        self.assertEqual(args.image_root, "/tmp/docs/images")
+        self.assertEqual(args.prompt_template, "<image>OCR this.")
+        self.assertFalse(args.freeze_vision_tower)
+        self.assertEqual(args.ocr_inference_mode, "base")
+
+    def test_multimodal_family_fails_loud_until_trainer_lands(self):
+        runner, _stubs = load_training_runner()
+
+        args = runner._normalize_spec(
+            {
+                "model": "baidu/Unlimited-OCR",
+                "model_family": "multimodal",
+                "adapter_path": "adapters",
+                "image_root": "/tmp/docs/images",
+            }
+        )
+
+        with self.assertRaises(NotImplementedError):
+            runner.run(args)
 
     def test_every_training_algorithm_dispatches_to_its_pipeline(self):
         expected_extra_args = {

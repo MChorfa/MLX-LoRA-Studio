@@ -181,6 +181,7 @@ enum TrainType: String, CaseIterable, Identifiable {
 enum ModelFamily: String, CaseIterable, Identifiable {
     case text
     case visionLanguage = "vision_language"
+    case multimodalOCR = "multimodal"
 
     var id: String { rawValue }
 
@@ -188,6 +189,25 @@ enum ModelFamily: String, CaseIterable, Identifiable {
         switch self {
         case .text: "Text LLM"
         case .visionLanguage: "Vision-Language"
+        case .multimodalOCR: "OCR / Multimodal"
+        }
+    }
+}
+
+/// Inference layout for OCR/multimodal models such as `baidu/Unlimited-OCR`.
+/// Mirrors the model's two upstream `infer` profiles: `gundam`
+/// (base_size 1024 / image_size 640, single image) and `base`
+/// (image_size 1024, multi-page documents).
+enum OCRInferenceMode: String, CaseIterable, Identifiable {
+    case gundam
+    case base
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .gundam: "Gundam (single image)"
+        case .base: "Base (multi-page)"
         }
     }
 }
@@ -449,6 +469,11 @@ struct TrainingConfig: Equatable {
     var vlmModel = ""
     var vlmOutputPath = ""
     var vlmDequantize = true
+    // OCR / multimodal (image-text LoRA) settings.
+    var imageRoot = ""
+    var promptTemplate = "<image>document parsing."
+    var freezeVisionTower = true
+    var ocrInferenceMode: OCRInferenceMode = .gundam
     var data = TrainMode.sft.defaultDataset
     var adapterPath = "adapters"
     var runFolderName = ""
@@ -649,6 +674,10 @@ struct TrainingConfig: Equatable {
         appendSpecString(&spec, "vlm_model", vlmModel)
         appendSpecString(&spec, "vlm_output_path", vlmOutputPath)
         spec["vlm_dequantize"] = vlmDequantize
+        appendSpecString(&spec, "image_root", imageRoot)
+        appendSpecString(&spec, "prompt_template", promptTemplate)
+        spec["freeze_vision_tower"] = freezeVisionTower
+        spec["ocr_inference_mode"] = ocrInferenceMode.rawValue
         appendSpecString(&spec, "reference_model_path", referenceModelPath)
         if trainMode.needsJudge { appendSpecString(&spec, "judge", judge) }
         appendSpecString(&spec, "epsilon_high", epsilonHigh)
@@ -1162,6 +1191,12 @@ extension TrainingConfig {
         }
         if let v = spec["vlm_model"] as? String { config.vlmModel = v }
         if let v = spec["vlm_output_path"] as? String { config.vlmOutputPath = v }
+        if let v = spec["image_root"] as? String { config.imageRoot = v }
+        if let v = spec["prompt_template"] as? String { config.promptTemplate = v }
+        if let v = spec["ocr_inference_mode"] as? String,
+            let mode = OCRInferenceMode(rawValue: v) {
+            config.ocrInferenceMode = mode
+        }
         if let v = spec["data"] as? String { config.data = v }
         if let v = spec["adapter_path"] as? String { config.adapterPath = v }
         if let v = spec["train_mode"] as? String, let mode = TrainMode(rawValue: v) {
@@ -1210,6 +1245,7 @@ extension TrainingConfig {
         config.fuseRemoveAdapters = boolValue(spec["fuse_remove_adapters"]) ?? config.fuseRemoveAdapters
         config.qatEnable = boolValue(spec["qat_enable"]) ?? config.qatEnable
         config.vlmDequantize = boolValue(spec["vlm_dequantize"]) ?? config.vlmDequantize
+        config.freezeVisionTower = boolValue(spec["freeze_vision_tower"]) ?? config.freezeVisionTower
         if config.qatEnable {
             config.fuseDequantize = false
         }

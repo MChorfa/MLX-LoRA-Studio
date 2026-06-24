@@ -68,6 +68,7 @@ Orthogonal to the loss: which tensors are trainable, how gradients become update
 - [LoRA](LoRA) — low-rank adapters; the default.
 - [DoRA](DoRA) — weight-decomposed LoRA (magnitude + direction).
 - [Full fine-tuning](Full-Fine-Tuning) — every weight trainable.
+- [OCR / Multimodal](OCR-Multimodal) — true image→text LoRA for document-OCR models (partial; trainer in progress).
 
 **Quantization**
 - [QLoRA](QLoRA) — load-time 4 / 6 / 8 / MXFP4-bit quantization of the base model.

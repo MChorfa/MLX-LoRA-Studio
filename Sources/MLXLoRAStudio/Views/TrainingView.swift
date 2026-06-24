@@ -104,6 +104,13 @@ private struct ModeStrip: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if config.modelFamily == .multimodalOCR {
+                Text("OCR mode runs a true multimodal LoRA fine-tune on image→text pairs (e.g. baidu/Unlimited-OCR) via MLX-VLM. Vision towers are memory-heavy on unified memory — keep batch size small and consider QLoRA.")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // The 8-mode segmented picker (SFT/DPO/CPO/ORPO/GRPO/Online
             // DPO/XPO/RLHF Reinforce/PPO). We use the original
             // segmented style — the wide rows make it easy to scan all
@@ -202,9 +209,25 @@ private struct ModelDataSection: View {
             HFAssetPicker(
                 text: $config.model,
                 kind: .model,
-                placeholder: config.modelFamily == .visionLanguage ? "Trainable text model or HF repo" : "Model or Hugging Face repo",
+                placeholder: modelFieldPlaceholder,
                 footer: cacheFooter
             )
+            if config.modelFamily == .multimodalOCR {
+                HFAssetPicker(
+                    text: $config.imageRoot,
+                    kind: .dataset,
+                    placeholder: "Image root folder (paths in the dataset are relative to this)",
+                    footer: "Each dataset row references an image path plus a target parsed-text string."
+                )
+                TextField("Prompt template", text: $config.promptTemplate)
+                Picker("Inference mode", selection: $config.ocrInferenceMode) {
+                    ForEach(OCRInferenceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                ToggleRow("Freeze vision tower (train language + projector only)", isOn: $config.freezeVisionTower)
+            }
             if config.modelFamily == .visionLanguage {
                 HFAssetPicker(
                     text: $config.vlmModel,
@@ -231,6 +254,14 @@ private struct ModelDataSection: View {
         .formBlock()
         .animation(.easeInOut(duration: 0.2), value: config.trainMode)
         .animation(.easeInOut(duration: 0.2), value: config.modelFamily)
+    }
+
+    private var modelFieldPlaceholder: String {
+        switch config.modelFamily {
+        case .visionLanguage: "Trainable text model or HF repo"
+        case .multimodalOCR: "OCR / multimodal model or HF repo (e.g. baidu/Unlimited-OCR)"
+        case .text: "Model or Hugging Face repo"
+        }
     }
 
     /// Footer line that summarises what the dropdown is showing, so the
@@ -346,7 +377,7 @@ private struct CoreTrainingSection: View {
                 NumberField("Sequence step size", value: $config.seqStepSize)
             }
             ToggleRow("Mask prompt loss", isOn: $config.maskPrompt)
-            ToggleRow(config.modelFamily == .visionLanguage ? "Export full VLM after training" : "Fuse merged model after training", isOn: $config.fuse)
+            ToggleRow(fuseToggleLabel, isOn: $config.fuse)
             if config.fuse, config.modelFamily == .text {
                 ToggleRow("Dequantize merged model", isOn: $config.fuseDequantize)
                 ToggleRow("Remove adapters after fuse", isOn: $config.fuseRemoveAdapters)
@@ -362,6 +393,14 @@ private struct CoreTrainingSection: View {
         .animation(.easeInOut(duration: 0.2), value: config.learningRateSchedule)
         .animation(.easeInOut(duration: 0.2), value: config.fuse)
         .animation(.easeInOut(duration: 0.2), value: config.modelFamily)
+    }
+
+    private var fuseToggleLabel: String {
+        switch config.modelFamily {
+        case .visionLanguage: "Export full VLM after training"
+        case .multimodalOCR: "Fuse merged OCR model after training"
+        case .text: "Fuse merged model after training"
+        }
     }
 }
 

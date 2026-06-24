@@ -106,6 +106,71 @@ struct TrainingConfigTests {
         #expect(config.vlmDequantize == false)
     }
 
+    @Test("OCR multimodal settings are written to the run spec")
+    func ocrSettingsAreWrittenToRunSpec() throws {
+        var config = TrainingConfig()
+        config.modelFamily = .multimodalOCR
+        config.model = "baidu/Unlimited-OCR"
+        config.imageRoot = "/tmp/docs/images"
+        config.promptTemplate = "<image>document parsing."
+        config.freezeVisionTower = false
+        config.ocrInferenceMode = .base
+
+        let data = try config.runSpecData(adapterPath: "/tmp/adapters")
+        let object = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        #expect(object["model_family"] as? String == "multimodal")
+        #expect(object["model"] as? String == "baidu/Unlimited-OCR")
+        #expect(object["image_root"] as? String == "/tmp/docs/images")
+        #expect(object["prompt_template"] as? String == "<image>document parsing.")
+        #expect(object["freeze_vision_tower"] as? Bool == false)
+        #expect(object["ocr_inference_mode"] as? String == "base")
+    }
+
+    @Test("OCR multimodal settings round trip from saved run specs")
+    func ocrSettingsRoundTripFromSavedRunSpecs() throws {
+        let spec: [String: Any] = [
+            "model": "baidu/Unlimited-OCR",
+            "model_family": "multimodal",
+            "image_root": "/tmp/docs/images",
+            "prompt_template": "<image>OCR this.",
+            "freeze_vision_tower": false,
+            "ocr_inference_mode": "base",
+            "data": "data/",
+            "train_mode": "sft",
+            "train_type": "lora"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: spec)
+
+        let config = try TrainingConfig(jsonData: data)
+
+        #expect(config.modelFamily == .multimodalOCR)
+        #expect(config.model == "baidu/Unlimited-OCR")
+        #expect(config.imageRoot == "/tmp/docs/images")
+        #expect(config.promptTemplate == "<image>OCR this.")
+        #expect(config.freezeVisionTower == false)
+        #expect(config.ocrInferenceMode == .base)
+    }
+
+    @Test("OCR defaults are sensible when family is multimodal")
+    func ocrDefaultsAreSensible() throws {
+        var config = TrainingConfig()
+        config.modelFamily = .multimodalOCR
+
+        let data = try config.runSpecData()
+        let object = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        // Defaults: prompt template seeded, vision tower frozen, gundam mode.
+        #expect(object["prompt_template"] as? String == "<image>document parsing.")
+        #expect(object["freeze_vision_tower"] as? Bool == true)
+        #expect(object["ocr_inference_mode"] as? String == "gundam")
+        #expect(object["image_root"] == nil)
+    }
+
     @Test("Resume candidate picks highest numbered adapter checkpoint")
     func resumeCandidatePicksHighestNumberedCheckpoint() throws {
         let root = FileManager.default.temporaryDirectory

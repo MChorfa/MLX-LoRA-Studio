@@ -21,6 +21,7 @@
 - [Full fine-tuning](Full-Fine-Tuning)
 - [QLoRA](QLoRA)
 - [QAT](QAT)
+- [OCR / Multimodal](OCR-Multimodal)
 - [Optimizers](Optimizers)
 
 **App sections**

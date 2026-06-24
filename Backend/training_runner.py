@@ -369,6 +369,7 @@ def _normalize_spec(spec: dict[str, Any]) -> SimpleNamespace:
         "lm_studio_name",
         "vlm_model",
         "vlm_output_path",
+        "image_root",
         "epsilon_high",
     ):
         if args.get(key) in (None, ""):
@@ -378,6 +379,10 @@ def _normalize_spec(spec: dict[str, Any]) -> SimpleNamespace:
     args["vlm_dequantize"] = bool(args.get("vlm_dequantize", True))
     args["fuse_dequantize"] = bool(args.get("fuse_dequantize", True))
     args["fuse_remove_adapters"] = bool(args.get("fuse_remove_adapters", True))
+    # OCR / multimodal (image-text LoRA) settings. See run_multimodal (Phase 3).
+    args["prompt_template"] = args.get("prompt_template") or "<image>document parsing."
+    args["freeze_vision_tower"] = bool(args.get("freeze_vision_tower", True))
+    args["ocr_inference_mode"] = args.get("ocr_inference_mode") or "gundam"
 
     args["batch_size"] = _positive_int(args.get("batch_size"), "batch_size")
     args["gradient_accumulation_steps"] = _positive_int(
@@ -846,7 +851,10 @@ def run(args: SimpleNamespace) -> None:
             wrapped_callback=callback,
         )
 
-    family = "VLM text-only" if args.model_family == "vision_language" else "Text"
+    family = {
+        "vision_language": "VLM text-only",
+        "multimodal": "OCR / multimodal",
+    }.get(args.model_family, "Text")
     studio_log(
         f"{family} {args.train_mode.upper()} {args.train_type.upper()} run | "
         f"{args.model} | batch {args.batch_size} | lr {args.learning_rate:g} | "
@@ -858,6 +866,17 @@ def run(args: SimpleNamespace) -> None:
         if not args.vlm_model:
             raise ValueError("VLM mode needs an original VLM repo or local folder.")
         studio_log(f"Original VLM for final export: {args.vlm_model}")
+    if args.model_family == "multimodal":
+        # TODO(ckodex): wire the MLX-VLM multimodal LoRA trainer (Phase 3 of the
+        # Unlimited-OCR support plan). Until the ported `unlimited_ocr` MLX model
+        # and the image-text training loop land, fail loud rather than silently
+        # routing image-text OCR runs through the text-only pipelines below.
+        raise NotImplementedError(
+            "OCR / multimodal training is not yet wired in this backend. It "
+            "requires the ported MLX-VLM model + image-text trainer (see the "
+            "Unlimited-OCR support plan, Phases 0-3). The run spec is accepted "
+            "and round-trips, but the trainer is pending."
+        )
 
     studio_log("Loading model")
     with quiet_vendor_output():
